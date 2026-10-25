@@ -1,0 +1,222 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CUSTOMER
+  DELIVERY
+}
+
+model Area {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  streets         Street[]
+  customers       User[]   @relation("CustomerArea")
+  deliveryPersons User[]   @relation("DeliveryHomeArea")
+}
+
+model Street {
+  id        Int      @id @default(autoincrement())
+  name      String
+  areaId    Int
+  createdAt DateTime @default(now())
+
+  area      Area     @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  customers User[]
+
+  @@unique([areaId, name])
+}
+
+model User {
+  id          Int      @id @default(autoincrement())
+  name        String
+  email       String   @unique
+  phone       String   @unique
+  password    String
+  role        Role     @default(CUSTOMER)
+  isActive    Boolean  @default(true)
+
+  // Customer address (door no / house name), plus area and street from dropdowns
+  addressLine String?
+  areaId      Int?
+  streetId    Int?
+
+  // Delivery person's fixed home area
+  homeAreaId  Int?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  area        Area?    @relation("CustomerArea", fields: [areaId], references: [id])
+  street      Street?  @relation(fields: [streetId], references: [id])
+  homeArea    Area?    @relation("DeliveryHomeArea", fields: [homeAreaId], references: [id])
+
+    // Step 2 relations
+  parcels           Parcel[]        @relation("CustomerParcels")
+  registeredParcels Parcel[]        @relation("RegisteredBy")
+  statusChanges     StatusHistory[]
+  notifications     Notification[]
+
+    // Step 4 relations
+  assignedParcels     Parcel[]     @relation("AssignedParcels")
+  deliveryAssignments Assignment[] @relation("DeliveryAssignments")
+  manualAssignments   Assignment[] @relation("ManualAssignedBy")
+}
+
+enum ParcelStatus {
+  REGISTERED
+  NOTIFIED
+  SLOT_BOOKED
+  ASSIGNED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+}
+
+enum ParcelType {
+  LETTER
+  SMALL
+  MEDIUM
+  LARGE
+}
+
+enum NotificationType {
+  PARCEL_ARRIVED
+  SLOT_BOOKED
+  ASSIGNED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RESCHEDULED
+  AUTO_ASSIGNED
+  UNASSIGNED_ALERT
+  GENERAL
+}
+model Parcel {
+  id             Int          @id @default(autoincrement())
+  trackingNumber String       @unique
+  customerId     Int
+  registeredById Int
+  senderName     String?
+  parcelType     ParcelType   @default(SMALL)
+  weight         Float?
+  status         ParcelStatus @default(REGISTERED)
+  arrivedAt      DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  customer      User            @relation("CustomerParcels", fields: [customerId], references: [id])
+  registeredBy  User            @relation("RegisteredBy", fields: [registeredById], references: [id])
+    assignedTo  User?        @relation("AssignedParcels", fields: [assignedToId], references: [id])
+  assignments Assignment[]
+  statusHistory StatusHistory[]
+  notifications Notification[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([slotDate, slotHour])
+    @@index([assignedToId, slotDate])
+
+    // Step 3: slot booking
+  slotDate        DateTime? @db.Date
+  slotHour        Int?
+  slotBookedAt    DateTime?
+  slotAutoBooked  Boolean   @default(false)
+  rescheduleCount Int       @default(0)
+    // Step 4: assignment
+  assignedToId     Int?
+  assignedAt       DateTime?
+  unassignedReason String?
+
+    // Step 5: delivery
+  outForDeliveryAt  DateTime?
+  deliveredAt       DateTime?
+  receivedBy        String?
+  failedAttempts    Int            @default(0)
+  lastFailedAt      DateTime?
+  lastFailureReason FailureReason?
+  lastFailureNote   String?
+}
+
+model StatusHistory {
+  id          Int          @id @default(autoincrement())
+  parcelId    Int
+  status      ParcelStatus
+  note        String?
+  changedById Int?
+  createdAt   DateTime     @default(now())
+
+  parcel    Parcel @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  changedBy User?  @relation(fields: [changedById], references: [id])
+
+  @@index([parcelId])
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  parcelId  Int?
+  type      NotificationType @default(GENERAL)
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parcel Parcel? @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+enum AssignmentMethod {
+  AI_AUTO
+  MANUAL
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  CANCELLED
+  COMPLETED
+  FAILED
+}
+
+model Assignment {
+  id                  Int              @id @default(autoincrement())
+  parcelId            Int
+  deliveryPersonId    Int
+  slotDate            DateTime         @db.Date
+  slotHour            Int
+  method              AssignmentMethod @default(AI_AUTO)
+  status              AssignmentStatus @default(ACTIVE)
+  score               Int?
+  scoreBreakdown      Json?
+  reason              String
+  candidatesEvaluated Int?
+  assignedById        Int?
+  createdAt           DateTime         @default(now())
+  endedAt             DateTime?
+    failureReason FailureReason?
+  failureNote   String?
+
+  parcel         Parcel @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  deliveryPerson User   @relation("DeliveryAssignments", fields: [deliveryPersonId], references: [id])
+  assignedBy     User?  @relation("ManualAssignedBy", fields: [assignedById], references: [id])
+
+  @@index([parcelId])
+  @@index([deliveryPersonId, slotDate])
+}
+enum FailureReason {
+  CUSTOMER_NOT_AVAILABLE
+  WRONG_ADDRESS
+  CUSTOMER_REFUSED
+  PREMISES_LOCKED
+  OTHER
+}
