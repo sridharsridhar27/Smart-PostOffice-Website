@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import api, { getErrorMessage } from "../../api/axios";
 import StatusBadge from "../../components/StatusBadge";
 import { addDays, getISTToday } from "../../utils/slot";
+import { areaWithPin } from "../../utils/address";
 
 export default function SlotBookings() {
   const today = getISTToday();
@@ -110,7 +111,7 @@ export default function SlotBookings() {
                             </td>
                             <td className="px-4 py-2.5">
                               <p>{p.customer.street?.name}</p>
-                              <p className="text-xs text-slate-500">{p.customer.area?.name}</p>
+                                                           <p className="text-xs text-slate-500">{areaWithPin(p.customer.area)}</p>
                             </td>
                                                         <td className="px-4 py-2.5">
                               {p.assignedTo ? (

@@ -4,9 +4,9 @@ const bcrypt = require("bcryptjs");
 const prisma = new PrismaClient();
 
 const areas = [
-  { name: "Area A", streets: ["Gandhi Street", "Nehru Street", "Bazaar Street"] },
-  { name: "Area B", streets: ["Temple Street", "Main Road", "School Street"] },
-  { name: "Area C", streets: ["Station Road", "Market Street", "Lake View Street"] },
+  { name: "Area A", pincode: "635601", streets: ["Gandhi Street", "Nehru Street", "Bazaar Street"] },
+  { name: "Area B", pincode: "635602", streets: ["Temple Street", "Main Road", "School Street"] },
+  { name: "Area C", pincode: "635603", streets: ["Station Road", "Market Street", "Lake View Street"] },
 ];
 const deliveryPersons = [
   { name: "Delivery Person 1", email: "dp1@postoffice.com", phone: "9100000001", area: "Area A" },
@@ -32,12 +32,11 @@ async function main() {
 
   // Areas and streets
   for (const a of areas) {
-    const area = await prisma.area.upsert({
+       const area = await prisma.area.upsert({
       where: { name: a.name },
-      update: {},
-      create: { name: a.name },
+      update: { pincode: a.pincode },
+      create: { name: a.name, pincode: a.pincode },
     });
-
     for (const s of a.streets) {
       await prisma.street.upsert({
         where: { areaId_name: { areaId: area.id, name: s } },

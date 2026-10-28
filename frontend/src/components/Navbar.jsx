@@ -16,6 +16,7 @@ const navLinks = {
     { to: "/admin/slot-bookings", label: "Slot Bookings" },
         { to: "/admin/assignments", label: "Assignments" },
     { to: "/admin/unassigned", label: "Unassigned" },
+        { to: "/admin/returns", label: "Returns" },
     { to: "/admin/barcodes", label: "Barcode Generator" },
   ],
   CUSTOMER: [{ to: "/customer", label: "My Parcels", end: true }],

@@ -22,6 +22,7 @@ import SlotBookings from "./pages/admin/SlotBookings";
 
 import AdminAssignments from "./pages/admin/AdminAssignments";
 import UnassignedQueue from "./pages/admin/UnassignedQueue";
+import AdminReturns from "./pages/admin/AdminReturns";
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="slot-bookings" element={<SlotBookings />} />
         <Route path="assignments" element={<AdminAssignments />} />
         <Route path="unassigned" element={<UnassignedQueue />} />
+                <Route path="returns" element={<AdminReturns />} />
       </Route>
 
       <Route

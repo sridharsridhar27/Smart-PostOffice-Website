@@ -10,6 +10,7 @@ const {
   formatDateLabel,
   getBookableDates,
 } = require("../utils/slotUtils");
+const { autoReturnOverdue } = require("./returnService");
 
 const TX_OPTIONS = { timeout: 20000, maxWait: 10000 };
 
@@ -21,6 +22,7 @@ const getAfterHours = () => {
 const cutoffFor = (afterHours) => new Date(Date.now() - afterHours * 60 * 60 * 1000);
 
 // Where-clause for parcels whose 24h booking window has passed
+// (FAILED parcels with 3 attempts are excluded - they wait for collection or return to sender)
 const dueWhere = (cutoff) => ({
   OR: [
     { status: "NOTIFIED", arrivedAt: { lte: cutoff } },
@@ -179,6 +181,11 @@ const autoBookParcel = async (parcelId, { afterHours = getAfterHours() } = {}) =
 let running = false;
 let lastRun = null;
 
+/**
+ * Runs every 15 minutes (and at startup):
+ *  1. Auto-books parcels with no booking for 24 hours, then runs the AI
+ *  2. Returns parcels to the sender when not collected within 7 days of the 3rd failure
+ */
 const runAutoBookJob = async ({ trigger = "cron" } = {}) => {
   if (running) return { skipped: true, reason: "Auto-booking job is already running" };
   running = true;
@@ -195,9 +202,12 @@ const runAutoBookJob = async ({ trigger = "cron" } = {}) => {
     noCapacity: 0,
     errors: 0,
     parcels: [],
+    returnedToSender: 0,
+    returnedParcels: [],
   };
 
   try {
+    // 1. Auto-booking
     const ids = await findDueParcelIds(afterHours);
     run.checked = ids.length;
 
@@ -220,15 +230,25 @@ const runAutoBookJob = async ({ trigger = "cron" } = {}) => {
         console.error(`Auto-book failed for parcel ${id}:`, err.message);
       }
     }
+
+    // 2. Not collected within 7 days after the 3rd failure -> return to sender
+    try {
+      const returned = await autoReturnOverdue();
+      run.returnedToSender = returned.length;
+      run.returnedParcels = returned;
+    } catch (err) {
+      run.errors++;
+      console.error("Auto return-to-sender failed:", err.message);
+    }
   } finally {
     run.finishedAt = new Date();
     lastRun = run;
     running = false;
   }
 
-  if (run.booked || run.errors) {
+  if (run.booked || run.errors || run.returnedToSender) {
     console.log(
-      `[auto-book] ${trigger}: checked ${run.checked}, booked ${run.booked}, assigned ${run.assigned}, errors ${run.errors}`
+      `[auto-book] ${trigger}: checked ${run.checked}, booked ${run.booked}, assigned ${run.assigned}, returned to sender ${run.returnedToSender}, errors ${run.errors}`
     );
   }
   return run;
@@ -236,7 +256,11 @@ const runAutoBookJob = async ({ trigger = "cron" } = {}) => {
 
 const getJobStatus = async () => {
   const afterHours = getAfterHours();
-  const [dueNow, dueWithin6h] = await Promise.all([countDue(afterHours), countDue(Math.max(afterHours - 6, 0.0001))]);
+  const [dueNow, dueWithin6h, overdueCollections] = await Promise.all([
+    countDue(afterHours),
+    countDue(Math.max(afterHours - 6, 0.0001)),
+    prisma.parcel.count({ where: { status: "FAILED", collectionDeadline: { lte: new Date() } } }),
+  ]);
   return {
     afterHours,
     schedule: process.env.AUTO_BOOK_CRON || "*/15 * * * *",
@@ -244,6 +268,7 @@ const getJobStatus = async () => {
     lastRun,
     dueNow,
     dueWithin6h: Math.max(0, dueWithin6h - dueNow),
+    overdueCollections,
   };
 };
 

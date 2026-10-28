@@ -22,6 +22,7 @@ const {
   formatDateLabel,
   getBookableDates,
   isTooSoon,
+  validateSlotRequest,
 } = require("../utils/slotUtils");
 
 const TX_OPTIONS = { timeout: 15000, maxWait: 10000 };
@@ -46,7 +47,7 @@ const httpError = (statusCode, message) => {
 };
 
 // Shared date/hour validation for book + reschedule. Returns { error } or { hour }
-const validateSlotRequest = (date, hourRaw) => {
+/* const validateSlotRequest = (date, hourRaw) => {
   const hour = Number(hourRaw);
 
   if (!isValidDateStr(date)) return { error: "Invalid date. Use YYYY-MM-DD format" };
@@ -69,7 +70,7 @@ const validateSlotRequest = (date, hourRaw) => {
   }
   return { hour };
 };
-
+ */
 const notifyAdmins = async (tx, { parcelId, type, title, message }) => {
   const admins = await tx.user.findMany({ where: { role: "ADMIN", isActive: true }, select: { id: true } });
   if (admins.length) {
@@ -357,7 +358,7 @@ const getSlotBookings = async (req, res, next) => {
               name: true,
               phone: true,
               addressLine: true,
-              area: { select: { id: true, name: true } },
+                           area: { select: { id: true, name: true, pincode: true } },
               street: { select: { id: true, name: true } },
             },
           },

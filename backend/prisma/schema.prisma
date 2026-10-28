@@ -16,6 +16,7 @@ enum Role {
 model Area {
   id        Int      @id @default(autoincrement())
   name      String   @unique
+  pincode   String   @unique
   createdAt DateTime @default(now())
 
   streets         Street[]
@@ -79,6 +80,11 @@ enum ParcelStatus {
   OUT_FOR_DELIVERY
   DELIVERED
   FAILED
+  RETURN_REQUESTED
+  PICKUP_ASSIGNED
+  OUT_FOR_PICKUP
+  PICKUP_FAILED
+  RETURNED_TO_SENDER
 }
 
 enum ParcelType {
@@ -98,7 +104,28 @@ enum NotificationType {
   RESCHEDULED
   AUTO_ASSIGNED
   UNASSIGNED_ALERT
+  RETURN_REQUESTED
+  PICKUP_UPDATE
+  RETURNED_TO_SENDER
   GENERAL
+}
+enum JobType {
+  DELIVERY
+  PICKUP
+}
+
+enum ReturnToSenderReason {
+  NOT_COLLECTED
+  CUSTOMER_REFUSED
+  ADMIN_DECISION
+  CUSTOMER_RETURN
+}
+
+enum CustomerReturnReason {
+  DAMAGED
+  WRONG_ITEM
+  NOT_NEEDED
+  OTHER
 }
 model Parcel {
   id             Int          @id @default(autoincrement())
@@ -123,7 +150,8 @@ model Parcel {
   @@index([customerId])
   @@index([status])
   @@index([slotDate, slotHour])
-    @@index([assignedToId, slotDate])
+  @@index([assignedToId, slotDate])
+  @@index([status, collectionDeadline])
 
     // Step 3: slot booking
   slotDate        DateTime? @db.Date
@@ -144,6 +172,20 @@ model Parcel {
   lastFailedAt      DateTime?
   lastFailureReason FailureReason?
   lastFailureNote   String?
+
+    // Return to sender
+  collectionDeadline DateTime?
+  collectedAtCounter Boolean               @default(false)
+  returnedAt         DateTime?
+  returnReason       ReturnToSenderReason?
+  returnNote         String?
+
+  // Customer return request
+  returnRequestedAt    DateTime?
+  customerReturnReason CustomerReturnReason?
+  customerReturnNote   String?
+  returnCancelledAt    DateTime?
+  pickupFailedAttempts Int                   @default(0)
 }
 
 model StatusHistory {
@@ -194,6 +236,7 @@ model Assignment {
   deliveryPersonId    Int
   slotDate            DateTime         @db.Date
   slotHour            Int
+  jobType JobType @default(DELIVERY)
   method              AssignmentMethod @default(AI_AUTO)
   status              AssignmentStatus @default(ACTIVE)
   score               Int?
@@ -203,7 +246,7 @@ model Assignment {
   assignedById        Int?
   createdAt           DateTime         @default(now())
   endedAt             DateTime?
-    failureReason FailureReason?
+  failureReason FailureReason?
   failureNote   String?
 
   parcel         Parcel @relation(fields: [parcelId], references: [id], onDelete: Cascade)

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import api, { getErrorMessage } from "../../api/axios";
 import StatusBadge from "../../components/StatusBadge";
 import { addDays, getISTToday } from "../../utils/slot";
+import { areaWithPin } from "../../utils/address";
 
 const barColor = (load) => (load >= 6 ? "bg-red-500" : load >= 4 ? "bg-amber-500" : "bg-green-500");
 
@@ -63,8 +64,9 @@ export default function AdminAssignments() {
               <p className="text-lg font-semibold">{data.dateLabel}</p>
             </div>
             <div className="rounded-xl bg-white p-4 shadow-sm">
-              <p className="text-xs uppercase text-slate-500">Parcels Assigned</p>
+              <p className="text-xs uppercase text-slate-500">Jobs Assigned</p>
               <p className="text-lg font-semibold">{data.totalAssigned}</p>
+              <p className="text-xs text-slate-500">deliveries + pickups</p>
             </div>
             <Link
               to="/admin/unassigned"
@@ -89,7 +91,7 @@ export default function AdminAssignments() {
                       )}
                     </p>
                     <p className="text-xs text-slate-500">
-                      Home: {dp.homeArea?.name || "-"} · {dp.phone}
+                                           Home: {areaWithPin(dp.homeArea)} · {dp.phone}
                     </p>
                   </div>
                   <p className="text-sm font-semibold">
@@ -105,7 +107,7 @@ export default function AdminAssignments() {
                 </div>
 
                 {dp.parcels.length === 0 ? (
-                  <p className="mt-3 text-sm text-slate-400">No parcels assigned</p>
+                  <p className="mt-3 text-sm text-slate-400">No jobs assigned</p>
                 ) : (
                   <ul className="mt-3 divide-y text-sm">
                     {dp.parcels.map((p) => (
@@ -116,9 +118,14 @@ export default function AdminAssignments() {
                             <Link to={`/admin/parcels/${p.id}`} className="font-mono font-medium text-red-700 hover:underline">
                               {p.trackingNumber}
                             </Link>
+                            {p.jobType === "PICKUP" && (
+                              <span className="ml-1 rounded bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700">
+                                pickup
+                              </span>
+                            )}
                           </p>
                           <p className="text-xs text-slate-500">
-                            {p.customer.street?.name}, {p.customer.area?.name}
+                                                       {p.customer.street?.name}, {areaWithPin(p.customer.area)}
                           </p>
                         </div>
                         <StatusBadge status={p.status} />

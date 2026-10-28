@@ -1,18 +1,30 @@
 const prisma = require("../config/prisma");
 const { getDayCapacity, ACTIVE_SLOT_STATUSES } = require("../services/slotService");
-const { LOAD_STATUSES } = require("../services/assignmentService");
+const { LOAD_STATUSES, WAITING_STATUSES } = require("../services/assignmentService");
 const { countDue, getAfterHours } = require("../services/autoBookService");
 const {
   SLOT_HOURS,
   MAX_PARCELS_PER_DAY,
-  MAX_DELIVERY_ATTEMPTS,
   getISTNow,
   toSlotDate,
   slotLabel,
   formatDateLabel,
 } = require("../utils/slotUtils");
 
-const ALL_STATUSES = ["REGISTERED", "NOTIFIED", "SLOT_BOOKED", "ASSIGNED", "OUT_FOR_DELIVERY", "DELIVERED", "FAILED"];
+const ALL_STATUSES = [
+  "REGISTERED",
+  "NOTIFIED",
+  "SLOT_BOOKED",
+  "ASSIGNED",
+  "OUT_FOR_DELIVERY",
+  "DELIVERED",
+  "FAILED",
+  "RETURN_REQUESTED",
+  "PICKUP_ASSIGNED",
+  "OUT_FOR_PICKUP",
+  "PICKUP_FAILED",
+  "RETURNED_TO_SENDER",
+];
 
 // GET /api/admin/dashboard
 const getDashboard = async (req, res, next) => {
@@ -29,6 +41,7 @@ const getDashboard = async (req, res, next) => {
       unassigned,
       autoBookDue,
       mustCollect,
+      overdueCollections,
       capacity,
       deliveryPersons,
       todayLoads,
@@ -36,6 +49,7 @@ const getDashboard = async (req, res, next) => {
       manualCount,
       aiAvg,
       autoBookedTotal,
+      returnedToday,
       recent,
     ] = await Promise.all([
       prisma.parcel.groupBy({ by: ["status"], _count: { _all: true } }),
@@ -46,9 +60,12 @@ const getDashboard = async (req, res, next) => {
         where: { slotDate: todayDate, status: { in: ACTIVE_SLOT_STATUSES } },
         _count: { _all: true },
       }),
-      prisma.parcel.count({ where: { status: "SLOT_BOOKED", assignedToId: null } }),
+      // Deliveries + pickups waiting for a partner
+      prisma.parcel.count({ where: { status: { in: WAITING_STATUSES }, assignedToId: null } }),
       countDue(),
-      prisma.parcel.count({ where: { status: "FAILED", failedAttempts: { gte: MAX_DELIVERY_ATTEMPTS } } }),
+      // Waiting to be collected at the counter (inside their 7 days or overdue)
+      prisma.parcel.count({ where: { status: "FAILED", collectionDeadline: { not: null } } }),
+      prisma.parcel.count({ where: { status: "FAILED", collectionDeadline: { lte: new Date() } } }),
       getDayCapacity(),
       prisma.user.findMany({
         where: { role: "DELIVERY", isActive: true },
@@ -64,6 +81,7 @@ const getDashboard = async (req, res, next) => {
       prisma.assignment.count({ where: { method: "MANUAL" } }),
       prisma.assignment.aggregate({ where: { method: "AI_AUTO" }, _avg: { score: true } }),
       prisma.parcel.count({ where: { slotAutoBooked: true } }),
+      prisma.parcel.count({ where: { status: "RETURNED_TO_SENDER", returnedAt: { gte: startOfTodayIST } } }),
       prisma.statusHistory.findMany({
         orderBy: { createdAt: "desc" },
         take: 10,
@@ -84,13 +102,13 @@ const getDashboard = async (req, res, next) => {
       pipeline[g.status] = g._count._all;
     });
 
-    // Today's deliveries by status
+    // Today's jobs by status
     const todayByStatus = Object.fromEntries(ALL_STATUSES.map((s) => [s, 0]));
     todayStatusGroups.forEach((g) => {
       todayByStatus[g.status] = g._count._all;
     });
 
-    // Failed attempts happening today clear the slot, so count them from assignments
+    // Failed attempts today clear the slot, so count them from assignments
     const failedToday = await prisma.assignment.count({ where: { slotDate: todayDate, status: "FAILED" } });
 
     const slotsToday = SLOT_HOURS.map((hour) => ({
@@ -99,9 +117,11 @@ const getDashboard = async (req, res, next) => {
       count: todaySlotGroups.find((g) => g.slotHour === hour)?._count._all || 0,
     }));
 
+    // Partner workload today: deliveries + pickups together
     const workload = deliveryPersons.map((dp) => {
       const rows = todayLoads.filter((l) => l.assignedToId === dp.id);
-      const by = (s) => rows.find((r) => r.status === s)?._count._all || 0;
+      const by = (...statuses) =>
+        rows.filter((r) => statuses.includes(r.status)).reduce((sum, r) => sum + r._count._all, 0);
       const load = rows.reduce((sum, r) => sum + r._count._all, 0);
       return {
         id: dp.id,
@@ -109,9 +129,10 @@ const getDashboard = async (req, res, next) => {
         homeArea: dp.homeArea?.name || null,
         load,
         capacity: MAX_PARCELS_PER_DAY,
-        assigned: by("ASSIGNED"),
-        outForDelivery: by("OUT_FOR_DELIVERY"),
-        delivered: by("DELIVERED"),
+        assigned: by("ASSIGNED", "PICKUP_ASSIGNED"),
+        outForDelivery: by("OUT_FOR_DELIVERY", "OUT_FOR_PICKUP"),
+        delivered: by("DELIVERED", "RETURNED_TO_SENDER"),
+        pickups: by("PICKUP_ASSIGNED", "OUT_FOR_PICKUP", "RETURNED_TO_SENDER"),
       };
     });
 
@@ -125,11 +146,12 @@ const getDashboard = async (req, res, next) => {
         arrived: arrivedToday,
         slotsBooked: bookedToday,
         capacity,
-        assigned: todayByStatus.ASSIGNED,
-        outForDelivery: todayByStatus.OUT_FOR_DELIVERY,
+        assigned: todayByStatus.ASSIGNED + todayByStatus.PICKUP_ASSIGNED,
+        outForDelivery: todayByStatus.OUT_FOR_DELIVERY + todayByStatus.OUT_FOR_PICKUP,
         delivered: todayByStatus.DELIVERED,
         failed: failedToday,
-        waitingAssignment: todayByStatus.SLOT_BOOKED,
+        waitingAssignment: todayByStatus.SLOT_BOOKED + todayByStatus.RETURN_REQUESTED,
+        pickups: todayByStatus.RETURN_REQUESTED + todayByStatus.PICKUP_ASSIGNED + todayByStatus.OUT_FOR_PICKUP,
       },
       pipeline,
       alerts: {
@@ -138,6 +160,7 @@ const getDashboard = async (req, res, next) => {
         autoBookAfterHours: getAfterHours(),
         unassigned,
         mustCollect,
+        overdueCollections,
       },
       slotsToday,
       workload,
@@ -147,6 +170,13 @@ const getDashboard = async (req, res, next) => {
         aiRate: aiCount + manualCount ? Math.round((aiCount / (aiCount + manualCount)) * 100) : 0,
         averageScore: aiAvg._avg.score ? Math.round(aiAvg._avg.score) : 0,
         autoBookedSlots: autoBookedTotal,
+      },
+      returns: {
+        activePickups:
+          pipeline.RETURN_REQUESTED + pipeline.PICKUP_ASSIGNED + pipeline.OUT_FOR_PICKUP + pipeline.PICKUP_FAILED,
+        pickupFailed: pipeline.PICKUP_FAILED,
+        returnedToSender: pipeline.RETURNED_TO_SENDER,
+        returnedToday,
       },
       recentActivity: recent,
     });

@@ -1,23 +1,22 @@
 const prisma = require("../config/prisma");
 const parseId = require("../utils/parseId");
-const {
-  FAILURE_REASONS,
-  markOutForDelivery,
-  markDelivered,
-  markFailed,
-} = require("../services/deliveryService");
+const { FAILURE_REASONS, startJob, completeJob, failJob } = require("../services/deliveryService");
+const { RETURN_REASONS } = require("../services/returnService");
 const { getISTNow, isValidDateStr, toSlotDate, slotLabel, formatDateLabel } = require("../utils/slotUtils");
 
-// GET /api/delivery/parcels?date=2026-10-26   (defaults to today)
-// Based on assignments, so failed attempts still show in the delivery person's list
+// Status shown on the delivery person's card, from the assignment + parcel
+const cardStatus = (a) => {
+  if (a.status === "FAILED") return a.jobType === "PICKUP" ? "PICKUP_FAILED" : "FAILED";
+  if (a.status === "COMPLETED") return a.jobType === "PICKUP" ? "PICKED_UP" : "DELIVERED";
+  return a.parcel.status; // ASSIGNED / OUT_FOR_DELIVERY / PICKUP_ASSIGNED / OUT_FOR_PICKUP
+};
+
+// GET /api/delivery/parcels?date=2026-10-26   (deliveries + pickups)
 const getMyDeliveries = async (req, res, next) => {
   try {
     const today = getISTNow().dateStr;
     const date = req.query.date || today;
-
-    if (!isValidDateStr(date)) {
-      return res.status(400).json({ message: "Invalid date. Use YYYY-MM-DD format" });
-    }
+    if (!isValidDateStr(date)) return res.status(400).json({ message: "Invalid date. Use YYYY-MM-DD format" });
 
     const assignments = await prisma.assignment.findMany({
       where: {
@@ -29,6 +28,7 @@ const getMyDeliveries = async (req, res, next) => {
       select: {
         id: true,
         status: true,
+        jobType: true,
         slotHour: true,
         failureReason: true,
         failureNote: true,
@@ -43,12 +43,14 @@ const getMyDeliveries = async (req, res, next) => {
             receivedBy: true,
             deliveredAt: true,
             outForDeliveryAt: true,
+            customerReturnReason: true,
+            customerReturnNote: true,
             customer: {
               select: {
                 name: true,
                 phone: true,
                 addressLine: true,
-                area: { select: { name: true } },
+                                area: { select: { name: true, pincode: true } },
                 street: { select: { name: true } },
               },
             },
@@ -57,23 +59,20 @@ const getMyDeliveries = async (req, res, next) => {
       },
     });
 
-    const deliveries = assignments.map((a) => {
-      const deliveryStatus =
-        a.status === "FAILED" ? "FAILED" : a.status === "COMPLETED" ? "DELIVERED" : a.parcel.status;
+    const deliveries = assignments.map((a) => ({
+      assignmentId: a.id,
+      jobType: a.jobType,
+      slotHour: a.slotHour,
+      slotLabel: slotLabel(a.slotHour),
+      deliveryStatus: cardStatus(a),
+      failureReason: a.failureReason,
+      failureReasonLabel: a.failureReason ? FAILURE_REASONS[a.failureReason] : null,
+      failureNote: a.failureNote,
+      returnReasonLabel: a.parcel.customerReturnReason ? RETURN_REASONS[a.parcel.customerReturnReason] : null,
+      parcel: a.parcel,
+    }));
 
-      return {
-        assignmentId: a.id,
-        slotHour: a.slotHour,
-        slotLabel: slotLabel(a.slotHour),
-        deliveryStatus,
-        failureReason: a.failureReason,
-        failureReasonLabel: a.failureReason ? FAILURE_REASONS[a.failureReason] : null,
-        failureNote: a.failureNote,
-        parcel: a.parcel,
-      };
-    });
-
-    const count = (s) => deliveries.filter((d) => d.deliveryStatus === s).length;
+    const count = (...statuses) => deliveries.filter((d) => statuses.includes(d.deliveryStatus)).length;
 
     res.json({
       date,
@@ -81,10 +80,11 @@ const getMyDeliveries = async (req, res, next) => {
       isToday: date === today,
       summary: {
         total: deliveries.length,
-        pending: count("ASSIGNED"),
-        outForDelivery: count("OUT_FOR_DELIVERY"),
-        delivered: count("DELIVERED"),
-        failed: count("FAILED"),
+        pickups: deliveries.filter((d) => d.jobType === "PICKUP").length,
+        pending: count("ASSIGNED", "PICKUP_ASSIGNED"),
+        outForDelivery: count("OUT_FOR_DELIVERY", "OUT_FOR_PICKUP"),
+        delivered: count("DELIVERED", "PICKED_UP"),
+        failed: count("FAILED", "PICKUP_FAILED"),
       },
       failureReasons: FAILURE_REASONS,
       deliveries,
@@ -94,21 +94,24 @@ const getMyDeliveries = async (req, res, next) => {
   }
 };
 
-// PATCH /api/delivery/parcels/:id/out-for-delivery
-const outForDelivery = async (req, res, next) => {
+// PATCH /api/delivery/parcels/:id/start   (alias: /out-for-delivery)
+const start = async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ message: "Invalid parcel id" });
 
-    const parcel = await markOutForDelivery({ parcelId: id, dp: req.user });
-    res.json({ message: "Parcel marked as out for delivery", parcel });
+    const result = await startJob({ parcelId: id, dp: req.user });
+    res.json({
+      message: result.jobType === "PICKUP" ? "Parcel marked as out for pickup" : "Parcel marked as out for delivery",
+      ...result,
+    });
   } catch (err) {
     next(err);
   }
 };
 
-// PATCH /api/delivery/parcels/:id/delivered   body: { receivedBy? }
-const delivered = async (req, res, next) => {
+// PATCH /api/delivery/parcels/:id/complete   (alias: /delivered)   body: { receivedBy? }
+const complete = async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ message: "Invalid parcel id" });
@@ -118,15 +121,18 @@ const delivered = async (req, res, next) => {
       return res.status(400).json({ message: "Received by must be 60 characters or less" });
     }
 
-    const parcel = await markDelivered({ parcelId: id, dp: req.user, receivedBy });
-    res.json({ message: "Parcel delivered successfully", parcel });
+    const result = await completeJob({ parcelId: id, dp: req.user, receivedBy });
+    res.json({
+      message: result.jobType === "PICKUP" ? "Return picked up – returning to sender" : "Parcel delivered successfully",
+      ...result,
+    });
   } catch (err) {
     next(err);
   }
 };
 
-// PATCH /api/delivery/parcels/:id/failed   body: { reason, note? }
-const failed = async (req, res, next) => {
+// PATCH /api/delivery/parcels/:id/fail   (alias: /failed)   body: { reason, note? }
+const fail = async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ message: "Invalid parcel id" });
@@ -135,27 +141,29 @@ const failed = async (req, res, next) => {
     const note = (req.body.note || "").trim();
 
     if (!FAILURE_REASONS[reason]) {
-      return res.status(400).json({
-        message: `Reason must be one of: ${Object.keys(FAILURE_REASONS).join(", ")}`,
-      });
+      return res.status(400).json({ message: `Reason must be one of: ${Object.keys(FAILURE_REASONS).join(", ")}` });
     }
-    if (reason === "OTHER" && !note) {
-      return res.status(400).json({ message: "Please describe the reason in the note" });
-    }
-    if (note.length > 200) {
-      return res.status(400).json({ message: "Note must be 200 characters or less" });
+    if (reason === "OTHER" && !note) return res.status(400).json({ message: "Please describe the reason in the note" });
+    if (note.length > 200) return res.status(400).json({ message: "Note must be 200 characters or less" });
+
+    const result = await failJob({ parcelId: id, dp: req.user, reason, note });
+
+    let message;
+    if (result.returnedToSender) message = "Customer refused – parcel will be returned to the sender";
+    else if (result.jobType === "PICKUP") {
+      message = result.returnCancelled
+        ? "Pickup failed twice – return request cancelled"
+        : "Pickup marked as failed. Customer has been asked to book a new pickup slot";
+    } else {
+      message = result.finalAttempt
+        ? "Delivery failed. Maximum attempts reached – customer has 7 days to collect from post office"
+        : "Delivery marked as failed. Customer has been asked to book a new slot";
     }
 
-    const result = await markFailed({ parcelId: id, dp: req.user, reason, note });
-    res.json({
-      message: result.finalAttempt
-        ? "Delivery failed. Maximum attempts reached – customer will collect from post office"
-        : "Delivery marked as failed. Customer has been asked to book a new slot",
-      ...result,
-    });
+    res.json({ message, ...result });
   } catch (err) {
     next(err);
   }
 };
 
-module.exports = { getMyDeliveries, outForDelivery, delivered, failed };
+module.exports = { getMyDeliveries, start, complete, fail };

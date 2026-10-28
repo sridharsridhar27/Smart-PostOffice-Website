@@ -11,7 +11,17 @@ const {
 } = require("../utils/slotUtils");
 
 // Parcels that use up a place in the day's capacity (FAILED frees its place)
-const ACTIVE_SLOT_STATUSES = ["SLOT_BOOKED", "ASSIGNED", "OUT_FOR_DELIVERY", "DELIVERED"];
+// Parcels that use up a place in the day's capacity (deliveries + pickups; FAILED frees its place)
+const ACTIVE_SLOT_STATUSES = [
+  "SLOT_BOOKED",
+  "ASSIGNED",
+  "OUT_FOR_DELIVERY",
+  "DELIVERED",
+  "RETURN_REQUESTED",
+  "PICKUP_ASSIGNED",
+  "OUT_FOR_PICKUP",
+  "RETURNED_TO_SENDER",
+];
 
 const getDayCapacity = async (client = prisma) => {
   const activeDeliveryPersons = await client.user.count({

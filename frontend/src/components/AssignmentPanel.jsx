@@ -21,7 +21,10 @@ export default function AssignmentPanel({ parcel, onChanged }) {
   const [error, setError] = useState("");
 
   const hasSlot = !!parcel.slotDate;
-  const canAssign = hasSlot && ["SLOT_BOOKED", "ASSIGNED"].includes(parcel.status);
+  const canAssign =
+    hasSlot && ["SLOT_BOOKED", "ASSIGNED", "RETURN_REQUESTED", "PICKUP_ASSIGNED"].includes(parcel.status);
+  const isPickupJob = ["RETURN_REQUESTED", "PICKUP_ASSIGNED", "OUT_FOR_PICKUP"].includes(parcel.status);
+  const waitingForPartner = ["SLOT_BOOKED", "RETURN_REQUESTED"].includes(parcel.status);
   const dateStr = parcel.slotDate?.slice(0, 10);
   const activeAssignment = parcel.assignments?.find((a) => a.status === "ACTIVE");
 
@@ -94,7 +97,7 @@ export default function AssignmentPanel({ parcel, onChanged }) {
   return (
     <div className="rounded-xl bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-semibold">Delivery Assignment</h3>
+        <h3 className="font-semibold">{isPickupJob ? "Pickup Assignment" : "Delivery Assignment"}</h3>
         {hasSlot && (
           <button
             onClick={togglePreview}
@@ -108,7 +111,7 @@ export default function AssignmentPanel({ parcel, onChanged }) {
       {/* Current state */}
       {parcel.assignedTo ? (
         <div className="rounded-lg border border-green-200 bg-green-50 p-4">
-          <p className="text-sm text-slate-600">Assigned to</p>
+          <p className="text-sm text-slate-600">{isPickupJob ? "Pickup assigned to" : "Assigned to"}</p>
           <p className="text-lg font-semibold text-green-800">
             {parcel.assignedTo.name} <span className="text-sm font-normal text-slate-600">· {parcel.assignedTo.phone}</span>
           </p>
@@ -118,6 +121,11 @@ export default function AssignmentPanel({ parcel, onChanged }) {
                 <span className="rounded bg-white px-1.5 py-0.5 text-xs font-medium">
                   {activeAssignment.method === "AI_AUTO" ? "🤖 AI" : "✋ Manual"}
                 </span>
+                {activeAssignment.jobType === "PICKUP" && (
+                  <span className="ml-1 rounded bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700">
+                    Pickup
+                  </span>
+                )}
                 {activeAssignment.score != null && (
                   <span className="ml-2 font-medium">Score {activeAssignment.score}</span>
                 )}
@@ -127,9 +135,11 @@ export default function AssignmentPanel({ parcel, onChanged }) {
             </div>
           )}
         </div>
-      ) : parcel.status === "SLOT_BOOKED" ? (
+      ) : waitingForPartner ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <p className="font-semibold text-amber-800">Not assigned yet</p>
+          <p className="font-semibold text-amber-800">
+            {isPickupJob ? "Pickup not assigned yet" : "Not assigned yet"}
+          </p>
           {parcel.unassignedReason && <p className="text-sm text-amber-700">{parcel.unassignedReason}</p>}
           <button
             onClick={runAutoAssign}
@@ -141,7 +151,7 @@ export default function AssignmentPanel({ parcel, onChanged }) {
         </div>
       ) : (
         <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
-          {hasSlot ? "No active assignment." : "Waiting for the customer to book a delivery slot."}
+          {hasSlot ? "No active assignment." : "Waiting for the customer to book a slot."}
         </p>
       )}
 
@@ -196,8 +206,8 @@ export default function AssignmentPanel({ parcel, onChanged }) {
             </table>
           </div>
           <p className="mt-2 text-xs text-slate-500">
-            Rules: same street in slot +50 · same area in slot +30 · home area +20 · +5 per free spot · max 6
-            parcels/day. Scores are calculated live, so they reflect the current workload.
+            Rules: same street in slot +50 · same area in slot +30 · home area +20 · +5 per free spot · max 6 jobs
+            (deliveries + pickups) per day. Scores are calculated live, so they reflect the current workload.
           </p>
         </div>
       )}
@@ -247,11 +257,14 @@ export default function AssignmentPanel({ parcel, onChanged }) {
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">
                     {a.method === "AI_AUTO" ? "🤖 AI" : "✋ Manual"}
                   </span>
+                  {a.jobType === "PICKUP" && (
+                    <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700">Pickup</span>
+                  )}
                   <span className={`rounded px-1.5 py-0.5 text-xs ${statusStyle[a.status]}`}>{a.status}</span>
                   {a.score != null && <span className="text-xs text-slate-500">Score {a.score}</span>}
                 </div>
                 <p className="mt-1 text-slate-600">{a.reason}</p>
-                                {a.failureReason && (
+                {a.failureReason && (
                   <p className="mt-1 text-sm text-red-700">
                     Failed: {FAILURE_REASON_LABELS[a.failureReason]}
                     {a.failureNote ? ` – ${a.failureNote}` : ""}

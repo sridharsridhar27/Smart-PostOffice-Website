@@ -2,10 +2,30 @@ import { useEffect, useState } from "react";
 import api, { getErrorMessage } from "../api/axios";
 
 /**
- * mode="book"       -> POST /customer/parcels/:id/book-slot   (new or after failed delivery)
- * mode="reschedule" -> POST /customer/parcels/:id/reschedule  (currentDate/currentHour = existing slot)
+ * mode = "book"       -> POST /customer/parcels/:id/book-slot
+ *        "reschedule" -> POST /customer/parcels/:id/reschedule   (currentDate/currentHour = existing slot)
+ *        "return"     -> POST /customer/parcels/:id/return       (extraBody = { reason, note })
+ *        "pickup"     -> POST /customer/parcels/:id/pickup-slot  (rebook after failed pickup)
+ * blocked = true disables the confirm button (e.g. return reason "Other" with no note)
  */
-export default function SlotPicker({ parcelId, onBooked, mode = "book", currentDate, currentHour, onCancel }) {
+const ENDPOINTS = { book: "book-slot", reschedule: "reschedule", return: "return", pickup: "pickup-slot" };
+const SUBMIT_LABELS = {
+  book: "Confirm Slot",
+  reschedule: "Confirm Reschedule",
+  return: "Confirm Return & Pickup",
+  pickup: "Confirm Pickup Slot",
+};
+
+export default function SlotPicker({
+  parcelId,
+  onBooked,
+  mode = "book",
+  currentDate,
+  currentHour,
+  onCancel,
+  extraBody = {},
+  blocked = false,
+}) {
   const [days, setDays] = useState([]);
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedHour, setSelectedHour] = useState(null);
@@ -47,14 +67,14 @@ export default function SlotPicker({ parcelId, onBooked, mode = "book", currentD
   };
 
   const handleSubmit = async () => {
-    if (!selectedDate || selectedHour == null) return;
+    if (!selectedDate || selectedHour == null || blocked) return;
     setSubmitting(true);
     setError("");
     try {
-      const endpoint = mode === "reschedule" ? "reschedule" : "book-slot";
-      const res = await api.post(`/customer/parcels/${parcelId}/${endpoint}`, {
+      const res = await api.post(`/customer/parcels/${parcelId}/${ENDPOINTS[mode]}`, {
         date: selectedDate,
         hour: selectedHour,
+        ...extraBody,
       });
       onBooked(res.data);
     } catch (err) {
@@ -142,7 +162,7 @@ export default function SlotPicker({ parcelId, onBooked, mode = "book", currentD
         <p className="text-sm">
           {selectedSlot ? (
             <>
-              {mode === "reschedule" ? "New slot" : "Selected"}:{" "}
+              {mode === "reschedule" ? "New slot" : mode === "return" || mode === "pickup" ? "Pickup" : "Selected"}:{" "}
               <span className="font-semibold">{selectedDay.dateLabel}</span>,{" "}
               <span className="font-semibold">{selectedSlot.label}</span>
             </>
@@ -163,10 +183,10 @@ export default function SlotPicker({ parcelId, onBooked, mode = "book", currentD
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!selectedSlot || submitting}
+            disabled={!selectedSlot || submitting || blocked}
             className="rounded-md bg-red-700 px-5 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-50"
           >
-            {submitting ? "Saving..." : mode === "reschedule" ? "Confirm Reschedule" : "Confirm Slot"}
+            {submitting ? "Saving..." : SUBMIT_LABELS[mode]}
           </button>
         </div>
       </div>

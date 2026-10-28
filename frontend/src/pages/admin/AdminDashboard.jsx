@@ -135,9 +135,10 @@ export default function AdminDashboard() {
       </div>
 
       {/* Alerts */}
+            {/* Alerts */}
       <div>
         <h3 className="mb-2 text-sm font-semibold uppercase text-slate-500">Needs Attention</h3>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <AlertCard
             to="/admin/parcels?status=NOTIFIED"
             label="Awaiting Slot Booking"
@@ -156,15 +157,26 @@ export default function AdminDashboard() {
             to="/admin/unassigned"
             label="Unassigned"
             value={data.alerts.unassigned}
-            hint="Booked but no delivery person"
+            hint="Deliveries + pickups with no partner"
             tone="amber"
           />
           <AlertCard
-            to="/admin/parcels?status=FAILED"
+            to="/admin/returns"
             label="Collect at Post Office"
             value={data.alerts.mustCollect}
-            hint="3 delivery attempts failed"
+            hint={
+              data.alerts.overdueCollections
+                ? `${data.alerts.overdueCollections} overdue – returning to sender`
+                : "Within their 7-day window"
+            }
             tone="red"
+          />
+          <AlertCard
+            to="/admin/returns"
+            label="Active Returns"
+            value={data.returns?.activePickups || 0}
+            hint={`${data.returns?.returnedToday || 0} returned to sender today`}
+            tone="indigo"
           />
         </div>
       </div>

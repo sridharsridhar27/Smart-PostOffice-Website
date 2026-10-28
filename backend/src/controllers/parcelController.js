@@ -13,6 +13,11 @@ const PARCEL_STATUSES = [
   "OUT_FOR_DELIVERY",
   "DELIVERED",
   "FAILED",
+  "RETURN_REQUESTED",
+  "PICKUP_ASSIGNED",
+  "OUT_FOR_PICKUP",
+  "PICKUP_FAILED",
+  "RETURNED_TO_SENDER",
 ];
 
 const customerSelect = {
@@ -21,7 +26,7 @@ const customerSelect = {
   phone: true,
   email: true,
   addressLine: true,
-  area: { select: { id: true, name: true } },
+    area: { select: { id: true, name: true, pincode: true } },
   street: { select: { id: true, name: true } },
 };
 
@@ -48,6 +53,16 @@ const parcelSelect = {
   lastFailedAt: true,
   lastFailureReason: true,
   lastFailureNote: true,
+    collectionDeadline: true,
+  collectedAtCounter: true,
+  returnedAt: true,
+  returnReason: true,
+  returnNote: true,
+  returnRequestedAt: true,
+  customerReturnReason: true,
+  customerReturnNote: true,
+  returnCancelledAt: true,
+  pickupFailedAttempts: true,
   assignedTo: { select: { id: true, name: true, phone: true } },
   customer: { select: customerSelect },
   registeredBy: { select: { id: true, name: true } },
@@ -192,12 +207,13 @@ const getParcels = async (req, res, next) => {
       where.status = status;
     }
 
-    if (search?.trim()) {
+        if (search?.trim()) {
       const s = search.trim();
       where.OR = [
         { trackingNumber: { contains: s, mode: "insensitive" } },
         { customer: { phone: { contains: s } } },
         { customer: { name: { contains: s, mode: "insensitive" } } },
+        { customer: { area: { pincode: { contains: s } } } },
       ];
     }
 

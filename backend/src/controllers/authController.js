@@ -10,9 +10,9 @@ const userSelect = {
   role: true,
   isActive: true,
   addressLine: true,
-  area: { select: { id: true, name: true } },
+   area: { select: { id: true, name: true, pincode: true } },
   street: { select: { id: true, name: true } },
-  homeArea: { select: { id: true, name: true } },
+  homeArea: { select: { id: true, name: true, pincode: true } },
   createdAt: true,
 };
 

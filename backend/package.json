@@ -6,7 +6,10 @@
   "scripts": {
   "dev": "nodemon src/server.js",
   "start": "node src/server.js",
-  "test:step1": "node tests/verify-step1.js"
+  "test:step1": "node tests/verify-step1.js",
+  "test:returnsdb": "node tests/verify-returns-db.js",
+  "test:returns": "node tests/verify-returns.js",
+  "test:pincodedb": "node tests/verify-pincode-db.js"
 },
   "prisma": {
     "seed": "node prisma/seed.js"

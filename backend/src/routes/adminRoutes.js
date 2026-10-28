@@ -20,6 +20,11 @@ const {
 } = require("../controllers/assignmentController");
 const { getDashboard } = require("../controllers/dashboardController");
 const { runAutoBookNow, getAutoBookStatus } = require("../controllers/jobController");
+const {
+  markCollectedHandler,
+  returnToSenderHandler,
+  getReturns,
+} = require("../controllers/returnController");
 
 const router = express.Router();
 
@@ -51,5 +56,10 @@ router.post("/parcels/:id/assign", manualAssignParcel);
 router.get("/dashboard", getDashboard);
 router.get("/jobs/auto-book/status", getAutoBookStatus);
 router.post("/jobs/auto-book/run", runAutoBookNow);
+
+// Returns
+router.get("/returns", getReturns);
+router.post("/parcels/:id/mark-collected", markCollectedHandler);
+router.post("/parcels/:id/return-to-sender", returnToSenderHandler);
 
 module.exports = router;

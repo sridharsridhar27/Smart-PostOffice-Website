@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import api, { getErrorMessage } from "../../api/axios";
 import BarcodeScanner from "../../components/BarcodeScanner";
 import { PARCEL_TYPES, PARCEL_TYPE_LABELS } from "../../utils/parcelStatus";
+import { formatAddress } from "../../utils/address";
 
 const inputClass =
   "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-red-600 focus:outline-none focus:ring-1 focus:ring-red-600";
@@ -108,7 +109,8 @@ export default function ScanParcel() {
         </ul>
 
         <div className="mt-5 rounded-lg bg-slate-50 p-4 font-mono text-sm">
-          {p.trackingNumber} → {p.customer.name} → {p.customer.street.name}, {p.customer.area.name}
+                    {p.trackingNumber} → {p.customer.name} → {p.customer.street.name}, {p.customer.area.name} –{" "}
+          {p.customer.area.pincode}
           <p className="mt-1 font-sans text-xs text-slate-500">Status: Waiting for customer slot booking</p>
         </div>
 
@@ -181,9 +183,7 @@ export default function ScanParcel() {
             {customer && (
               <div className="mt-3 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
                 <p className="font-semibold text-green-800">✓ {customer.name}</p>
-                <p className="text-slate-700">
-                  {customer.addressLine}, {customer.street?.name}, {customer.area?.name}
-                </p>
+                <p className="text-slate-700">{formatAddress(customer)}</p>
                 <p className="text-slate-500">{customer.email}</p>
               </div>
             )}

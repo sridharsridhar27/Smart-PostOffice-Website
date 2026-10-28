@@ -2,6 +2,7 @@ const prisma = require("../config/prisma");
 const parseId = require("../utils/parseId");
 const {
   LOAD_STATUSES,
+  WAITING_STATUSES,
   assignParcel,
   manualAssign,
   previewCandidates,
@@ -16,7 +17,7 @@ const {
   formatDateLabel,
 } = require("../utils/slotUtils");
 
-// POST /api/admin/parcels/:id/auto-assign   (re-run AI, e.g. from unassigned queue)
+// POST /api/admin/parcels/:id/auto-assign   (re-run AI for a delivery or a pickup)
 const autoAssignParcel = async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
@@ -27,7 +28,7 @@ const autoAssignParcel = async (req, res, next) => {
       select: { status: true, assignedToId: true },
     });
     if (!parcel) return res.status(404).json({ message: "Parcel not found" });
-    if (parcel.status !== "SLOT_BOOKED" || parcel.assignedToId) {
+    if (!WAITING_STATUSES.includes(parcel.status) || parcel.assignedToId) {
       return res.status(409).json({ message: "Parcel is not waiting for assignment" });
     }
 
@@ -56,6 +57,7 @@ const manualAssignParcel = async (req, res, next) => {
       message: result.reassigned ? "Parcel reassigned successfully" : "Parcel assigned successfully",
       deliveryPerson: result.deliveryPerson,
       assignment: result.assignment,
+      jobType: result.jobType,
     });
   } catch (err) {
     next(err);
@@ -81,11 +83,11 @@ const previewAssignment = async (req, res, next) => {
   }
 };
 
-// GET /api/admin/assignments/unassigned
+// GET /api/admin/assignments/unassigned   (deliveries + pickups waiting for a partner)
 const getUnassignedParcels = async (req, res, next) => {
   try {
     const parcels = await prisma.parcel.findMany({
-      where: { status: "SLOT_BOOKED", assignedToId: null },
+      where: { status: { in: WAITING_STATUSES }, assignedToId: null },
       orderBy: [{ slotDate: "asc" }, { slotHour: "asc" }],
       select: {
         id: true,
@@ -98,7 +100,7 @@ const getUnassignedParcels = async (req, res, next) => {
           select: {
             name: true,
             phone: true,
-            area: { select: { id: true, name: true } },
+                       area: { select: { id: true, name: true, pincode: true } },
             street: { select: { id: true, name: true } },
           },
         },
@@ -130,7 +132,7 @@ const getWorkload = async (req, res, next) => {
           name: true,
           phone: true,
           isActive: true,
-          homeArea: { select: { id: true, name: true } },
+                   homeArea: { select: { id: true, name: true, pincode: true } },
           assignedParcels: {
             where: { slotDate, status: { in: LOAD_STATUSES } },
             orderBy: { slotHour: "asc" },
@@ -142,7 +144,7 @@ const getWorkload = async (req, res, next) => {
               customer: {
                 select: {
                   name: true,
-                  area: { select: { name: true } },
+                                   area: { select: { name: true, pincode: true } },
                   street: { select: { name: true } },
                 },
               },
@@ -150,15 +152,21 @@ const getWorkload = async (req, res, next) => {
           },
         },
       }),
-      prisma.parcel.count({ where: { slotDate, status: "SLOT_BOOKED", assignedToId: null } }),
+      prisma.parcel.count({ where: { slotDate, status: { in: WAITING_STATUSES }, assignedToId: null } }),
     ]);
+
+    const pickupStatuses = ["PICKUP_ASSIGNED", "OUT_FOR_PICKUP", "RETURNED_TO_SENDER"];
 
     const result = deliveryPersons.map(({ assignedParcels, ...dp }) => ({
       ...dp,
       load: assignedParcels.length,
       capacity: MAX_PARCELS_PER_DAY,
       freeSpots: Math.max(0, MAX_PARCELS_PER_DAY - assignedParcels.length),
-      parcels: assignedParcels.map((p) => ({ ...p, slotLabel: slotLabel(p.slotHour) })),
+      parcels: assignedParcels.map((p) => ({
+        ...p,
+        slotLabel: slotLabel(p.slotHour),
+        jobType: pickupStatuses.includes(p.status) ? "PICKUP" : "DELIVERY",
+      })),
     }));
 
     res.json({

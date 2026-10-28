@@ -181,7 +181,19 @@ export default function Register() {
             </select>
           </div>
 
-          <div className="md:col-span-2">
+                    <div>
+            <label className="mb-1 block text-sm font-medium">Pincode</label>
+            <input
+              value={selectedArea?.pincode || ""}
+              readOnly
+              disabled
+              placeholder="Select area first"
+              className={`${inputClass} font-mono`}
+            />
+            <p className="mt-1 text-xs text-slate-500">Filled automatically from the area</p>
+          </div>
+
+          <div>
             <label className="mb-1 block text-sm font-medium">Door No / House Name</label>
             <input
               name="addressLine"

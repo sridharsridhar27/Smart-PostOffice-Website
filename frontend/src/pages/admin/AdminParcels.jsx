@@ -63,7 +63,7 @@ export default function AdminParcels() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className={`${inputClass} min-w-64 flex-1`}
-          placeholder="Search tracking no, customer name or phone"
+                    placeholder="Search tracking no, name, phone or pincode"
         />
         <select value={status} onChange={handleStatusChange} className={inputClass}>
           <option value="">All statuses</option>
@@ -115,7 +115,10 @@ export default function AdminParcels() {
                     <p className="text-xs text-slate-500">{p.customer.phone}</p>
                   </td>
                   <td className="px-4 py-3">
-                    <p>{p.customer.area?.name}</p>
+                                        <p>
+                      {p.customer.area?.name}{" "}
+                      <span className="font-mono text-xs text-slate-500">· {p.customer.area?.pincode}</span>
+                    </p>
                     <p className="text-xs text-slate-500">{p.customer.street?.name}</p>
                   </td>
                   <td className="px-4 py-3">{PARCEL_TYPE_LABELS[p.parcelType]}</td>

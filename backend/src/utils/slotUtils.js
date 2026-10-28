@@ -5,6 +5,9 @@ const MIN_LEAD_MINUTES = 60; // same-day slot must start 1 hour from now
 const TIMEZONE = "Asia/Kolkata";
 const MAX_RESCHEDULES = 2; // per parcel
 const MAX_DELIVERY_ATTEMPTS = 3; // after this, customer collects from post office
+const COLLECTION_WINDOW_DAYS = 7; // collect from post office after 3rd failure
+const RETURN_WINDOW_DAYS = 7; // customer can request a return within 7 days of delivery
+const MAX_PICKUP_ATTEMPTS = 2; // then the return request is cancelled
 
 // Current date and minutes-of-day in India time (works whatever the server timezone is)
 const getISTNow = () => {
@@ -67,6 +70,30 @@ const getBookableDates = (now = getISTNow()) =>
 // Today's slot that already started or starts within the lead time
 const isTooSoon = (dateStr, hour, now = getISTNow()) =>
   dateStr === now.dateStr && hour * 60 < now.minutes + MIN_LEAD_MINUTES;
+// Shared date/hour validation for booking, reschedule and pickups. Returns { error } or { hour }
+const validateSlotRequest = (date, hourRaw) => {
+  const hour = Number(hourRaw);
+
+  if (!isValidDateStr(date)) return { error: "Invalid date. Use YYYY-MM-DD format" };
+  if (!Number.isInteger(hour) || !SLOT_HOURS.includes(hour)) {
+    return { error: "Slot must be between 9 AM and 5 PM" };
+  }
+
+  const now = getISTNow();
+  const bookable = getBookableDates(now);
+
+  if (!bookable.includes(date)) {
+    return {
+      error: `You can book slots only from ${formatDateLabel(bookable[0])} to ${formatDateLabel(
+        bookable[bookable.length - 1]
+      )}`,
+    };
+  }
+  if (isTooSoon(date, hour, now)) {
+    return { error: "This slot has already started or starts within 1 hour. Please choose a later slot." };
+  }
+  return { hour };
+};
 
 module.exports = {
   SLOT_HOURS,
@@ -82,6 +109,10 @@ module.exports = {
   formatDateLabel,
   getBookableDates,
   isTooSoon,
-    MAX_RESCHEDULES,
+  MAX_RESCHEDULES,
   MAX_DELIVERY_ATTEMPTS,
+  COLLECTION_WINDOW_DAYS,
+  RETURN_WINDOW_DAYS,
+  MAX_PICKUP_ATTEMPTS,
+  validateSlotRequest,
 };

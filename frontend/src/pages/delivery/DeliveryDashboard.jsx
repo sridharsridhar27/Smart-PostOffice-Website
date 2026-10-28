@@ -5,9 +5,13 @@ import StatusBadge from "../../components/StatusBadge";
 import { PARCEL_TYPE_LABELS } from "../../utils/parcelStatus";
 import { formatDateTime } from "../../utils/format";
 import { addDays, getISTToday } from "../../utils/slot";
+import { areaWithPin, formatAddress } from "../../utils/address";
 
 const inputClass =
   "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-red-600 focus:outline-none focus:ring-1 focus:ring-red-600";
+
+const TO_START = ["ASSIGNED", "PICKUP_ASSIGNED"];
+const ON_THE_WAY = ["OUT_FOR_DELIVERY", "OUT_FOR_PICKUP"];
 
 export default function DeliveryDashboard() {
   const { user } = useAuth();
@@ -20,7 +24,7 @@ export default function DeliveryDashboard() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Inline form: { parcelId, type: "delivered" | "failed" }
+  // Inline form: { parcelId, type: "complete" | "fail" }
   const [form, setForm] = useState(null);
   const [receivedBy, setReceivedBy] = useState("");
   const [failReason, setFailReason] = useState("CUSTOMER_NOT_AVAILABLE");
@@ -53,13 +57,13 @@ export default function DeliveryDashboard() {
     setError("");
   };
 
-  const runAction = async (fn, successText) => {
+  const runAction = async (fn) => {
     setBusy(true);
     setError("");
     setMessage("");
     try {
-      await fn();
-      setMessage(successText);
+      const res = await fn();
+      setMessage(`✓ ${res?.data?.message || "Done"}`);
       setForm(null);
       await load();
     } catch (err) {
@@ -69,32 +73,21 @@ export default function DeliveryDashboard() {
     }
   };
 
-  const startDelivery = (d) =>
-    runAction(
-      () => api.patch(`/delivery/parcels/${d.parcel.id}/out-for-delivery`),
-      `✓ ${d.parcel.trackingNumber} is out for delivery`
-    );
+  const startJob = (d) => runAction(() => api.patch(`/delivery/parcels/${d.parcel.id}/start`));
 
   const startAll = (items) =>
     runAction(async () => {
-      for (const d of items) {
-        await api.patch(`/delivery/parcels/${d.parcel.id}/out-for-delivery`);
-      }
-    }, `✓ ${items.length} parcel(s) out for delivery`);
+      for (const d of items) await api.patch(`/delivery/parcels/${d.parcel.id}/start`);
+      return { data: { message: `${items.length} job(s) started` } };
+    });
 
-  const submitDelivered = (d) =>
-    runAction(
-      () => api.patch(`/delivery/parcels/${d.parcel.id}/delivered`, { receivedBy }),
-      `✓ ${d.parcel.trackingNumber} delivered`
-    );
+  const completeJob = (d) =>
+    runAction(() => api.patch(`/delivery/parcels/${d.parcel.id}/complete`, { receivedBy }));
 
-  const submitFailed = (d) =>
-    runAction(
-      () => api.patch(`/delivery/parcels/${d.parcel.id}/failed`, { reason: failReason, note: failNote }),
-      `${d.parcel.trackingNumber} marked as failed. Customer has been notified.`
-    );
+  const failJob = (d) =>
+    runAction(() => api.patch(`/delivery/parcels/${d.parcel.id}/fail`, { reason: failReason, note: failNote }));
 
-  // Group deliveries by slot (already sorted by slot from the API)
+  // Group by slot (already sorted by slot from the API)
   const groups = [];
   (data?.deliveries || []).forEach((d) => {
     let g = groups.find((x) => x.slotHour === d.slotHour);
@@ -122,7 +115,7 @@ export default function DeliveryDashboard() {
         <div>
           <h2 className="text-xl font-semibold">My Deliveries</h2>
           <p className="text-sm text-slate-500">
-            {user?.name} · Home area: {user?.homeArea?.name}
+                        {user?.name} · Home area: {areaWithPin(user?.homeArea)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -144,13 +137,12 @@ export default function DeliveryDashboard() {
         <p className="text-sm text-slate-500">Loading...</p>
       ) : (
         <>
-          {/* Summary */}
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="mb-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
             {[
-              ["Total", data.summary.total, "text-slate-800"],
+              ["Total jobs", data.summary.total, "text-slate-800"],
               ["To Start", data.summary.pending, "text-indigo-700"],
               ["On the Way", data.summary.outForDelivery, "text-purple-700"],
-              ["Delivered", data.summary.delivered, "text-green-700"],
+              ["Done", data.summary.delivered, "text-green-700"],
               ["Failed", data.summary.failed, "text-red-700"],
             ].map(([label, value, color]) => (
               <div key={label} className="rounded-xl bg-white p-3 text-center shadow-sm">
@@ -159,21 +151,24 @@ export default function DeliveryDashboard() {
               </div>
             ))}
           </div>
+          {data.summary.pickups > 0 && (
+            <p className="mb-4 text-sm text-orange-700">Includes {data.summary.pickups} return pickup(s).</p>
+          )}
 
           {!data.isToday && data.summary.total > 0 && (
-            <div className="mb-4 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-              Viewing {data.dateLabel}. You can start these deliveries on that day.
+            <div className="mb-4 mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              Viewing {data.dateLabel}. You can start these jobs on that day.
             </div>
           )}
 
           {groups.length === 0 ? (
-            <div className="rounded-xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
-              No deliveries for {data.dateLabel}.
+            <div className="mt-4 rounded-xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+              No jobs for {data.dateLabel}.
             </div>
           ) : (
-            <div className="space-y-5">
+            <div className="mt-4 space-y-5">
               {groups.map((g) => {
-                const toStart = g.items.filter((d) => d.deliveryStatus === "ASSIGNED");
+                const toStart = g.items.filter((d) => TO_START.includes(d.deliveryStatus));
                 return (
                   <div key={g.slotHour}>
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -192,19 +187,32 @@ export default function DeliveryDashboard() {
                     <div className="grid gap-3 md:grid-cols-2">
                       {g.items.map((d) => {
                         const p = d.parcel;
+                        const isPickup = d.jobType === "PICKUP";
                         const formOpen = form?.parcelId === p.id;
+                        const reasons = Object.entries(data.failureReasons).filter(
+                          ([value]) => !(isPickup && value === "CUSTOMER_REFUSED")
+                        );
+
                         return (
-                          <div key={d.assignmentId} className="rounded-xl bg-white p-4 shadow-sm">
+                          <div
+                            key={d.assignmentId}
+                            className={`rounded-xl bg-white p-4 shadow-sm ${isPickup ? "border-l-4 border-orange-400" : ""}`}
+                          >
                             <div className="flex items-start justify-between gap-2">
-                              <p className="font-mono font-semibold">{p.trackingNumber}</p>
+                              <p className="font-mono font-semibold">
+                                {p.trackingNumber}
+                                {isPickup && (
+                                  <span className="ml-2 rounded bg-orange-100 px-1.5 py-0.5 font-sans text-xs font-semibold text-orange-700">
+                                    PICKUP
+                                  </span>
+                                )}
+                              </p>
                               <StatusBadge status={d.deliveryStatus} />
                             </div>
 
                             <div className="mt-2 text-sm">
                               <p className="font-medium">{p.customer.name}</p>
-                              <p className="text-slate-600">
-                                {p.customer.addressLine}, {p.customer.street?.name}, {p.customer.area?.name}
-                              </p>
+                                                            <p className="text-slate-600">{formatAddress(p.customer)}</p>
                               <a href={`tel:${p.customer.phone}`} className="text-red-700 hover:underline">
                                 📞 {p.customer.phone}
                               </a>
@@ -213,6 +221,12 @@ export default function DeliveryDashboard() {
                                 {p.weight ? ` · ${p.weight} kg` : ""}
                                 {p.senderName ? ` · from ${p.senderName}` : ""}
                               </p>
+                              {isPickup && d.returnReasonLabel && (
+                                <p className="mt-1 text-xs font-medium text-orange-700">
+                                  Return reason: {d.returnReasonLabel}
+                                  {p.customerReturnNote ? ` – ${p.customerReturnNote}` : ""}
+                                </p>
+                              )}
                             </div>
 
                             {/* Result info */}
@@ -222,34 +236,40 @@ export default function DeliveryDashboard() {
                                 {p.receivedBy ? ` · Received by ${p.receivedBy}` : ""}
                               </p>
                             )}
-                            {d.deliveryStatus === "FAILED" && (
+                            {d.deliveryStatus === "PICKED_UP" && (
+                              <p className="mt-3 rounded-md bg-green-50 px-3 py-2 text-xs text-green-800">
+                                Picked up · returning to sender
+                              </p>
+                            )}
+                            {["FAILED", "PICKUP_FAILED"].includes(d.deliveryStatus) && (
                               <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-800">
                                 Failed: {d.failureReasonLabel}
                                 {d.failureNote ? ` – ${d.failureNote}` : ""}
                               </p>
                             )}
 
-                            {/* Actions */}
-                            {d.deliveryStatus === "ASSIGNED" && data.isToday && (
+                            {/* Start */}
+                            {TO_START.includes(d.deliveryStatus) && data.isToday && (
                               <button
-                                onClick={() => startDelivery(d)}
+                                onClick={() => startJob(d)}
                                 disabled={busy}
                                 className="mt-3 w-full rounded-md bg-purple-600 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
                               >
-                                🚚 Start Delivery
+                                🚚 {isPickup ? "Start Pickup" : "Start Delivery"}
                               </button>
                             )}
 
-                            {d.deliveryStatus === "OUT_FOR_DELIVERY" && !formOpen && (
+                            {/* Complete / fail buttons */}
+                            {ON_THE_WAY.includes(d.deliveryStatus) && !formOpen && (
                               <div className="mt-3 grid grid-cols-2 gap-2">
                                 <button
-                                  onClick={() => openForm(p.id, "delivered")}
+                                  onClick={() => openForm(p.id, "complete")}
                                   className="rounded-md bg-green-600 py-2 text-sm font-semibold text-white hover:bg-green-700"
                                 >
-                                  ✅ Delivered
+                                  ✅ {isPickup ? "Picked Up" : "Delivered"}
                                 </button>
                                 <button
-                                  onClick={() => openForm(p.id, "failed")}
+                                  onClick={() => openForm(p.id, "fail")}
                                   className="rounded-md bg-red-600 py-2 text-sm font-semibold text-white hover:bg-red-700"
                                 >
                                   ✖ Failed
@@ -257,17 +277,25 @@ export default function DeliveryDashboard() {
                               </div>
                             )}
 
-                            {/* Delivered form */}
-                            {formOpen && form.type === "delivered" && (
+                            {/* Complete form */}
+                            {formOpen && form.type === "complete" && (
                               <div className="mt-3 space-y-2 rounded-lg border border-green-200 bg-green-50 p-3">
-                                <label className="block text-xs font-medium">Received by (optional)</label>
-                                <input
-                                  value={receivedBy}
-                                  onChange={(e) => setReceivedBy(e.target.value)}
-                                  maxLength={60}
-                                  placeholder="e.g. Self, Neighbour - Ramesh"
-                                  className={inputClass}
-                                />
+                                {isPickup ? (
+                                  <p className="text-sm text-green-800">
+                                    Confirm you have collected the parcel from the customer.
+                                  </p>
+                                ) : (
+                                  <>
+                                    <label className="block text-xs font-medium">Received by (optional)</label>
+                                    <input
+                                      value={receivedBy}
+                                      onChange={(e) => setReceivedBy(e.target.value)}
+                                      maxLength={60}
+                                      placeholder="e.g. Self, Neighbour - Ramesh"
+                                      className={inputClass}
+                                    />
+                                  </>
+                                )}
                                 <div className="flex gap-2">
                                   <button
                                     onClick={() => setForm(null)}
@@ -276,18 +304,18 @@ export default function DeliveryDashboard() {
                                     Cancel
                                   </button>
                                   <button
-                                    onClick={() => submitDelivered(d)}
+                                    onClick={() => completeJob(d)}
                                     disabled={busy}
                                     className="flex-1 rounded-md bg-green-600 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                                   >
-                                    Confirm Delivered
+                                    {isPickup ? "Confirm Picked Up" : "Confirm Delivered"}
                                   </button>
                                 </div>
                               </div>
                             )}
 
-                            {/* Failed form */}
-                            {formOpen && form.type === "failed" && (
+                            {/* Fail form */}
+                            {formOpen && form.type === "fail" && (
                               <div className="mt-3 space-y-2 rounded-lg border border-red-200 bg-red-50 p-3">
                                 <label className="block text-xs font-medium">Reason</label>
                                 <select
@@ -295,12 +323,17 @@ export default function DeliveryDashboard() {
                                   onChange={(e) => setFailReason(e.target.value)}
                                   className={inputClass}
                                 >
-                                  {Object.entries(data.failureReasons).map(([value, label]) => (
+                                  {reasons.map(([value, label]) => (
                                     <option key={value} value={value}>
                                       {label}
                                     </option>
                                   ))}
                                 </select>
+                                {failReason === "CUSTOMER_REFUSED" && (
+                                  <p className="rounded bg-white px-2 py-1 text-xs font-medium text-red-700">
+                                    The parcel will be returned to the sender. The customer cannot rebook it.
+                                  </p>
+                                )}
                                 <label className="block text-xs font-medium">
                                   Note {failReason === "OTHER" ? "(required)" : "(optional)"}
                                 </label>
@@ -319,7 +352,7 @@ export default function DeliveryDashboard() {
                                     Cancel
                                   </button>
                                   <button
-                                    onClick={() => submitFailed(d)}
+                                    onClick={() => failJob(d)}
                                     disabled={busy || (failReason === "OTHER" && !failNote.trim())}
                                     className="flex-1 rounded-md bg-red-600 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                                   >

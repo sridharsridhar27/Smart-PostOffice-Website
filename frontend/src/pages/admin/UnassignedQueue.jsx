@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { getErrorMessage } from "../../api/axios";
 import { formatSlot } from "../../utils/slot";
-
+import { areaWithPin } from "../../utils/address";
 export default function UnassignedQueue() {
   const [parcels, setParcels] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -44,8 +44,8 @@ export default function UnassignedQueue() {
     <div>
       <h2 className="text-xl font-semibold">Unassigned Queue</h2>
       <p className="mb-4 text-sm text-slate-500">
-        Parcels with a booked slot but no delivery person. Run the AI again (e.g. after adding a delivery person) or
-        assign manually.
+        Deliveries and return pickups with a booked slot but no delivery person. Run the AI again (e.g. after adding a
+        delivery person) or assign manually.
       </p>
 
       {message && (
@@ -70,16 +70,23 @@ export default function UnassignedQueue() {
             {loading ? (
               <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Loading...</td></tr>
             ) : parcels.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-green-700">🎉 All booked parcels are assigned</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-green-700">🎉 All booked deliveries and pickups are assigned</td></tr>
             ) : (
               parcels.map((p) => (
                 <tr key={p.id} className="border-t">
-                  <td className="px-4 py-3 font-mono font-medium">{p.trackingNumber}</td>
+                  <td className="px-4 py-3 font-mono font-medium">
+                    {p.trackingNumber}
+                    {p.status === "RETURN_REQUESTED" && (
+                      <span className="ml-2 rounded bg-orange-100 px-1.5 py-0.5 font-sans text-xs font-medium text-orange-700">
+                        PICKUP
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{formatSlot(p)}</td>
                   <td className="px-4 py-3">
                     <p>{p.customer.name}</p>
                     <p className="text-xs text-slate-500">
-                      {p.customer.street?.name}, {p.customer.area?.name}
+                                            {p.customer.street?.name}, {areaWithPin(p.customer.area)}
                     </p>
                   </td>
                   <td className="px-4 py-3 text-amber-700">{p.unassignedReason || "Not attempted yet"}</td>
